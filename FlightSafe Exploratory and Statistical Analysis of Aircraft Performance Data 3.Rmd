@@ -1,0 +1,281 @@
+---
+title: "Stat Modeling Assignment 3"
+author: "Group 9"
+date: "2024-02-17"
+output: html_document
+---
+
+```{r}
+# install.packages('corrgram')
+# install.packages('ROCR')
+# install.packages('PerformanceAnalytics')
+```
+
+```{r}
+library(dplyr)
+library(ROCR)
+library(rms)
+library(pdp)
+library(corrgram)
+```
+
+# Question 1: Subset the data to only include observations on red wines. Describe the distribution of the response. Based on the nature of the response variable, what type of regression model would you suggest starting with (and why)?
+
+```{r}
+wine<- read.csv("wine.csv", stringsAsFactors = TRUE)
+
+red_wine<- wine%>%
+  filter(type=="red")%>%
+  subset(,-13)
+
+attach(red_wine)
+head(red_wine)
+```
+
+```{r}
+hist(quality)
+```
+
+Response variable Quality is discrete with values ranging from 3 to 8. Its a problem of classification as we have discrete response. We can use Multinomial logistic regression or ordinal logistic regression.
+
+# Question 2: Explore the data using summary statistics and graphics. Do any of the variables appear to have an association with the overall quality score? If so, which? Describe the nature of these associations.
+
+```{r}
+library(PerformanceAnalytics)
+
+chart.Correlation(red_wine, histogram = TRUE, method = "pearson")
+```
+Density and quality have a correlation factor of -0.3.
+Alcohol content correlates positively with wine quality. 3.There seems to be a connection between sulfur dioxide and residual sugar in wines. 4.Expected influence of alcohol content and residual sugar concentration on wine density.
+Correlation between fixed acidity and total fixed acidity as the first one is part of the latter.
+Color shows relationships with density, residual sugar, total sulfur dioxide and volatile acidity.
+
+```{r}
+par(mfrow=c(2,2))
+for (i in 1:ncol(red_wine)){
+  boxplot(red_wine[,i]~red_wine$quality,main=colnames(red_wine[i]))  
+}
+```
+Wines with higher quality seem to have a higher alcohol content. But the relationship does not seem very significant as the boxes are very wide and overlap for the different categories.
+
+Wines with lower chloride concentrations tend to be of better quality but the effect seems very weak. The boxes are wide and one can see a lot of outliers for the mid quality wines.
+
+We can only see a very weak negative correlation in the visualization of acetic acid concentration versus wine quality.
+
+
+# Question 3: Construct a binary response according to the following rule Y =( 1, quality >= 7 0, quality < 7) Fit a logistic regression to the data using all possible main effects (i.e., include each variable, but no interaction effects). Assess the performance of this model. Does the model seem well-calibrated? Discuss and provide a plot of a calibration curve.
+
+```{r}
+quality_fact <- as.factor(red_wine$quality)
+ red_wine<- red_wine%>%
+  # mutate(quality_fact=as.factor(quality))%>%
+    mutate(quality = as.factor(case_when(
+    quality >=7 ~ 1,
+    TRUE ~ 0
+  ))) 
+
+
+
+logit_full <- glm(quality ~ ., family = binomial(link = "logit"), data = red_wine)
+
+summary(logit_full)
+```
+```{r}
+pred_logit_full<- predict(logit_full, type="response")
+
+
+pred <- prediction(pred_logit_full, red_wine$quality)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+```
+
+```{r}
+#Get the AUC
+unlist(slot(performance(pred, "auc"), "y.values"))
+```
+The full logistic model is working well as we have AUC > 0.7.
+
+# Question 4: Interpret the effect of the predictor alcohol on the odds that quality >= 7. Construct an effect plot visualizing the effect of alcohol on the probability that quality >= 7 and describe the relationship. Does this plot look linear or nonlinear? If nonlinear, discuss how this is possible.
+
+```{r}
+boxplot(red_wine$alcohol~red_wine$quality)
+```
+
+```{r}
+boxplot(red_wine$alcohol~quality_fact)
+```
+content and the probability of having quality >= 7 is non-linear. Non-linear relationships can occur if there are interactions between the predictor variables or if the effect of the predictor variable on the response variable changes at different levels of the predictor variable.
+
+
+# Question 5 Discuss reasons why the modeling approach used in 3) is ill-advised for modeling these data
+
+The modeling approach used in part 3 is not advised because logistic regression can be used for binary responses,but in this case the quality varies from 3 to 8 as it has 6 different values.
+
+# Question 6: Fit an ordinal regression model to the data using the original response (i.e., quality) using the orm() function from R package rms. Construct an effect plot for each predictor showing the effect on the predicted probability that quality >= 7. From these, try to determine the top three predictors solely in terms of their effect on the predicted probability that quality >= 7
+
+```{r}
+red_wine$quality <- quality_fact
+fit.orm <- orm(quality ~ ., data = red_wine)
+
+pfun.orm <- function(object, newdata) {
+  colMeans(predict(object, newdata = newdata, type = "fitted"))
+}
+
+
+par(mfrow=c(2,5))
+pd.fixed.acidity <- partial(fit.orm, pred.var = "fixed.acidity", pred.fun = pfun.orm)
+
+pd.fixed.acidity %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = fixed.acidity,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("fixed.acidity") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("fixed.acidity" = quantile(fixed.acidity, prob = 1:9/10)),
+            aes(x = fixed.acidity), inherit.aes = FALSE)
+```
+
+```{r}
+pd.volatile.acidity <- partial(fit.orm, pred.var = "volatile.acidity", pred.fun = pfun.orm)
+
+pd.volatile.acidity %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = volatile.acidity,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("volatile.acidity") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("volatile.acidity" = quantile(volatile.acidity, prob = 1:9/10)),
+            aes(x = volatile.acidity), inherit.aes = FALSE)
+```
+```{r}
+pd.citric.acid <- partial(fit.orm, pred.var = "citric.acid", pred.fun = pfun.orm)
+
+pd.citric.acid %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = citric.acid,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("citric.acid") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("citric.acid" = quantile(citric.acid, prob = 1:9/10)),
+            aes(x = citric.acid), inherit.aes = FALSE)
+```
+```{r}
+pd.residual.sugar <- partial(fit.orm, pred.var = "residual.sugar", pred.fun = pfun.orm)
+
+pd.residual.sugar %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = residual.sugar,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("residual.sugar") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("residual.sugar" = quantile(residual.sugar, prob = 1:9/10)),
+            aes(x = residual.sugar), inherit.aes = FALSE)
+```
+```{r}
+pd.chlorides <- partial(fit.orm, pred.var = "chlorides", pred.fun = pfun.orm)
+
+pd.chlorides %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = chlorides,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("chlorides") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("chlorides" = quantile(chlorides, prob = 1:9/10)),
+            aes(x = chlorides), inherit.aes = FALSE)
+```
+```{r}
+pd.total.sulfur.dioxide <- partial(fit.orm, pred.var = "total.sulfur.dioxide",pred.fun = pfun.orm)
+
+pd.total.sulfur.dioxide %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = total.sulfur.dioxide,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("total.sulfur.dioxide") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("total.sulfur.dioxide" = quantile(total.sulfur.dioxide, prob = 1:9/10)),
+            aes(x = total.sulfur.dioxide), inherit.aes = FALSE)
+```
+```{r}
+pd.density <- partial(fit.orm, pred.var = "density", pred.fun = pfun.orm)
+
+pd.density %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = density,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("density") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("density" = quantile(density, prob = 1:9/10)),
+            aes(x = density), inherit.aes = FALSE)
+```
+```{r}
+####  [9] "pH"                  
+
+pd.pH <- partial(fit.orm, pred.var = "pH", pred.fun = pfun.orm)
+
+pd.pH %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = pH,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("pH") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("pH" = quantile(pH, prob = 1:9/10)),
+            aes(x = pH), inherit.aes = FALSE)
+```
+```{r}
+####
+pd.sulphates <- partial(fit.orm, pred.var = "sulphates",pred.fun = pfun.orm)
+
+pd.sulphates %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = sulphates,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("sulphates") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("sulphates" = quantile(sulphates, prob = 1:9/10)),
+            aes(x = sulphates), inherit.aes = FALSE)
+```
+```{r}
+pd.alcohol <- partial(fit.orm, pred.var = "alcohol",pred.fun = pfun.orm)
+
+pd.alcohol %>%
+  filter(yhat.id =="y>=7") %>%
+ggplot(aes(x = alcohol,y = yhat, linetype = yhat.id, color = yhat.id)) +
+  geom_line(size = 2) +
+  xlab("alcohol") +
+  ylab("Partial dependence") +
+   geom_rug(data = data.frame("alcohol" = quantile(alcohol, prob = 1:9/10)),
+            aes(x = alcohol), inherit.aes = FALSE)
+```
+The top three predictors solely in terms of their effect on the predicted probability that quality >= 7 are fixed.acidity, total.sulf.dioxide and [pH]
+
+# Question 7: Consider an observation x0 (i.e., a single red wine) with the following characteristics: ## ## fixed.acidity 7.3000 ## volatile.acidity 0.6500 ## citric.acid 0.0000 ## residual.sugar 1.2000 ## chlorides 0.0650 ## free.sulfur.dioxide 15.0000 ## total.sulfur.dioxide 21.0000 ## density 0.9946 ## pH 3.3900 ## sulphates 0.4700 ## alcohol 10.0000 Based on your fitted model from 6), provide estimates for the following quantities: • P r (quality == 7|x − 0) • P r (quality >= 7|x0) • P r (quality == 9|x0) • P r (quality >= 9|x0)
+
+
+```{r}
+ test <- red_wine[1,]
+
+test$fixed.acidity <- 7.3000
+test$volatile.acidity <- 0.6500
+test$citric.acid <- 0.0000
+test$residual.sugar <- 1.2000
+test$chlorides <- 0.0650
+test$free.sulfur.dioxide <- 15.0000
+test$total.sulfur.dioxide <- 21.0000
+test$density <- 0.9946
+test$pH <- 3.3900
+test$sulphates <- 0.4700
+test$alcohol <- 10.0000
+
+predict(fit.orm, newdata = test, type = "fitted")[4]
+```
+```{r}
+predict(fit.orm, newdata = test, type = "fitted.ind")[5]
+```
+
+• P r (quality == 9|x0) • P r (quality >= 9|x0) are not available as the model fitted data had no observations with Quality=9
+
+# Question 8: You’re asked to use your model from part 6) to provide predictions for the white wines included in the original data. Discuss whether or not you think this is a reasonable request and why. What would you do in practice (e.g., what if this was your boss asking)?
+
+We can not use model built in part 6 to make predictions for the white wines because data used in part 6 is for red wine. The characteristic of white wine will be different from the red wine.
+
+In practice , we need to train our model on white wine dataset and then use it for the prediction.

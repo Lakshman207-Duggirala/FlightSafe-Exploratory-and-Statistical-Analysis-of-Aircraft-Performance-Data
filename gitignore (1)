@@ -1,0 +1,13 @@
+# R and RStudio
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Output
+*.html
+*.pdf
+
+# System
+.DS_Store
+Thumbs.db
